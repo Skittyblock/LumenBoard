@@ -337,11 +337,11 @@ static UIImage *LMRenderPreview(NSArray<NSString *> *paths) {
   content.imageProperties.tintColor = [UIColor tertiaryLabelColor];
   cell.contentConfiguration = content;
   cell.accessoryType = (indexPath.section == LMThemeSectionActive) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-  cell.showsReorderControl = YES;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
   UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"Theme" forIndexPath:indexPath];
+  cell.showsReorderControl = indexPath.section == LMThemeSectionActive;
   [self configureCell:cell atIndexPath:indexPath];
   return cell;
 }
