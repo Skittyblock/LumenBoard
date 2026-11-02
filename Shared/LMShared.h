@@ -73,3 +73,5 @@ static inline NSString *LMJailbreakPath(NSString *path) {
 #define LMStatusMapIcons @"MapIcons"
 #define LMStatusCounters @"Counters"
 #define LMStatusEvents @"Events"
+
+#define LMLocalized(text) NSLocalizedString(text, nil)
