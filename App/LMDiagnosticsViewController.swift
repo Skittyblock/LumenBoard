@@ -2,6 +2,15 @@ import UIKit
 
 // The report is in English, it's meant to be pasted into a bug report.
 
+private enum LMDiagnostics {
+    static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+}
+
 func LMYesNo(_ value: Bool) -> String {
     value ? "yes" : "no"
 }
@@ -10,9 +19,7 @@ func LMDateString(_ date: Any) -> String {
   guard let date = date as? Date else {
       return "-"
   }
-  let formatter = DateFormatter() // todo: reuse
-  formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-  return formatter.string(from: date)
+  return LMDiagnostics.dateFormatter.string(from: date)
 }
 
 func LMExists(_ path: String) -> Bool {
@@ -136,7 +143,7 @@ func LMAppendProcess(_ report: NSMutableString, _ name: String, _ status: [Strin
     }
 }
 
-func LMDiagnosticsReport() -> String {
+func LMDiagnosticsReport() async -> String {
     let report = NSMutableString()
     var name = utsname()
     uname(&name)
@@ -165,13 +172,14 @@ func LMDiagnosticsReport() -> String {
     let map = NSDictionary(contentsOfFile: LMIconMapPath) as? [String:Any] ?? [:]
     let mapIcons = map[LMMapIcons] as? [String: Any] ?? [:]
     var findings = [String]()
-    if LMConfigStore.shared.enabledThemes.isEmpty {
+    let enabledThemes = await LMConfigStore.shared.enabledThemes
+    if enabledThemes.isEmpty {
         findings.append("No active theme.")
     }
     if apply == nil {
         findings.append("SpringBoard never applied a theme (Apply didn't reach LumenBoardSpringBoard).")
     }
-    if !LMConfigStore.shared.enabledThemes.isEmpty && mapIcons.isEmpty {
+    if !enabledThemes.isEmpty && mapIcons.isEmpty {
         findings.append("The icon map is empty: the active themes have no icons for installed apps.")
     }
     if springBoard == nil || !LMProcessRunning(springBoard!) {
@@ -199,12 +207,11 @@ func LMDiagnosticsReport() -> String {
     }
 
     // themes
-    let config = LMConfigStore.shared
     LMThemeLibrary.invalidate()
     let installed = LMThemeLibrary.installedThemes()
-    report.append("\nThemes in \(LMThemesDirectory): \(installed.count) installed, \(config.enabledThemes.count) active (*)\n")
+    report.append("\nThemes in \(LMThemesDirectory): \(installed.count) installed, \(enabledThemes.count) active (*)\n")
     var themes = installed
-    for theme in config.enabledThemes where !themes.contains(theme) {
+    for theme in enabledThemes where !themes.contains(theme) {
         themes.append(theme)
     }
     for theme in themes {
@@ -219,7 +226,7 @@ func LMDiagnosticsReport() -> String {
         } else {
             state = ""
         }
-        report.append("  \(config.enabledThemes.contains(theme) ? "* " : "")\(theme): \(byBundleID) by bundle id, \(byName) by app name\(state)\n")
+        report.append("  \(enabledThemes.contains(theme) ? "* " : "")\(theme): \(byBundleID) by bundle id, \(byName) by app name\(state)\n")
         if byBundleID + byName > 0 || !installed.contains(theme) {
             continue
         }
@@ -229,7 +236,9 @@ func LMDiagnosticsReport() -> String {
             report.append("      \(folder): \(LMFolderSummary(directory.appending("/\(folder)")))\n")
         }
     }
-    report.append("  iOS icon shape: \(LMYesNo(config.useSystemIconShape)), keep in dark & tinted: \(LMYesNo(config.keepIconsInDarkAndTinted))\n")
+    let useSystemIconShape = await LMConfigStore.shared.useSystemIconShape
+    let keepIconsInDarkAndTinted = await LMConfigStore.shared.keepIconsInDarkAndTinted
+    report.append("  iOS icon shape: \(LMYesNo(useSystemIconShape)), keep in dark & tinted: \(LMYesNo(keepIconsInDarkAndTinted))\n")
 
     // icon map
     let mapExists = LMExists(LMIconMapPath)
@@ -295,11 +304,11 @@ final class LMDiagnosticsViewController: UIViewController {
     @objc
     func reload() {
         textView?.text = LMLocalized("Loading…")
-        DispatchQueue.global(qos: .userInitiated).async {
-            let report = LMDiagnosticsReport()
-            DispatchQueue.main.async {
-                self.textView?.text = report
-            }
+        Task {
+            let report = await Task.detached(priority: .userInitiated) {
+                await LMDiagnosticsReport()
+            }.value
+            self.textView?.text = report
         }
     }
 

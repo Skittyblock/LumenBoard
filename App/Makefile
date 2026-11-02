@@ -6,6 +6,7 @@ $(APPLICATION_NAME)_FRAMEWORKS = UIKit QuartzCore ImageIO
 $(APPLICATION_NAME)_CFLAGS = -fobjc-arc -Wall -Wno-deprecated-declarations -Wno-unguarded-availability-new
 $(APPLICATION_NAME)_CODESIGN_FLAGS = -Sentitlements.plist
 $(APPLICATION_NAME)_SWIFT_BRIDGING_HEADER = LumenBoard-Bridging-Header.h
+$(APPLICATION_NAME)_SWIFT_VERSION = 6
 
 ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
 $(APPLICATION_NAME)_SWIFTFLAGS += -D THEOS_PACKAGE_SCHEME_ROOTHIDE

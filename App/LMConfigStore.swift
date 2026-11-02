@@ -1,41 +1,53 @@
 import Darwin
 import Foundation
 
+private func loadXML(fromPath path: String) -> [String: Any] {
+    let data = try? Data(contentsOf: URL(fileURLWithPath: path))
+    return data.flatMap {
+        var format: PropertyListSerialization.PropertyListFormat = .xml
+        return try? PropertyListSerialization.propertyList(
+            from: $0,
+            options: [],
+            format: &format
+        ) as? [String: Any]
+    } ?? [:]
+}
+
 // Config.plist, the only thing the app writes. SpringBoard turns it into the icon map on "Apply".
-final class LMConfigStore: NSObject {
+actor LMConfigStore {
     static let shared = LMConfigStore()
 
     // theme folder names, highest priority first
-    var enabledThemes: [String] = []
-    var useSystemIconShape = false
-    var keepIconsInDarkAndTinted = false
+    var enabledThemes: [String]
+    var useSystemIconShape: Bool
+    var keepIconsInDarkAndTinted: Bool
 
-    private var appliedConfig: NSDictionary = [:]
+    private var appliedConfig: [String: Any] = [:]
 
-    override init() {
-        super.init()
-
-        let data = try? Data(contentsOf: URL(fileURLWithPath: LMConfigPath))
-        let config = data.flatMap {
-            var format: PropertyListSerialization.PropertyListFormat = .xml
-            return try? PropertyListSerialization.propertyList(
-                from: $0,
-                options: [],
-                format: &format
-            ) as? [String: Any]
-        } ?? [:]
-
-        let themes = config[LMConfigEnabledThemes]
-        enabledThemes = themes as? [String] ?? []
-        useSystemIconShape = (config[LMConfigUseSystemIconShape] as? Bool) ?? false
-        keepIconsInDarkAndTinted = (config[LMConfigKeepIconsInDarkAndTinted] as? Bool) ?? false
-        // what SpringBoard last applied, so the app knows about pending changes even after a restart
-        let applied = NSDictionary(contentsOfFile: LMIconMapPath)?[LMMapAppliedConfig]
-        appliedConfig = applied as? NSDictionary ?? dictionaryRepresentation()
+    struct SettingsSnapshot: Sendable {
+        var useSystemIconShape: Bool = false
+        var keepIconsInDarkAndTinted: Bool = false
     }
 
-    // todo: don't want nsdictionary
-    func dictionaryRepresentation() -> NSDictionary {
+    init() {
+        let config = loadXML(fromPath: LMConfigPath)
+        let themes = config[LMConfigEnabledThemes]
+        let enabledThemes = themes as? [String] ?? []
+        let useSystemIconShape = (config[LMConfigUseSystemIconShape] as? Bool) ?? false
+        let keepIconsInDarkAndTinted = (config[LMConfigKeepIconsInDarkAndTinted] as? Bool) ?? false
+        // what SpringBoard last applied, so the app knows about pending changes even after a restart
+        let applied = loadXML(fromPath: LMIconMapPath)[LMMapAppliedConfig] as? [String: Any]
+        appliedConfig = applied ?? [
+            LMConfigEnabledThemes: enabledThemes,
+            LMConfigUseSystemIconShape: useSystemIconShape,
+            LMConfigKeepIconsInDarkAndTinted: keepIconsInDarkAndTinted
+        ]
+        self.enabledThemes = enabledThemes
+        self.useSystemIconShape = useSystemIconShape
+        self.keepIconsInDarkAndTinted = keepIconsInDarkAndTinted
+    }
+
+    func dictionaryRepresentation() -> [String: Any] {
         [
             LMConfigEnabledThemes: enabledThemes,
             LMConfigUseSystemIconShape: useSystemIconShape,
@@ -45,7 +57,7 @@ final class LMConfigStore: NSObject {
 
     // changed since the last apply
     var hasUnappliedChanges: Bool {
-        !dictionaryRepresentation().isEqual(appliedConfig)
+        !NSDictionary(dictionary: dictionaryRepresentation()).isEqual(NSDictionary(dictionary: appliedConfig))
     }
 
     func save() throws {
@@ -59,5 +71,24 @@ final class LMConfigStore: NSObject {
 
     func markApplied() {
         appliedConfig = dictionaryRepresentation()
+    }
+
+    func settingsSnapshot() -> SettingsSnapshot {
+        .init(
+            useSystemIconShape: useSystemIconShape,
+            keepIconsInDarkAndTinted: keepIconsInDarkAndTinted
+        )
+    }
+
+    func setEnabledThemes(_ enabledThemes: [String]) {
+        self.enabledThemes = enabledThemes
+    }
+
+    func setUseSystemIconShape(_ useSystemIconShape: Bool) {
+        self.useSystemIconShape = useSystemIconShape
+    }
+
+    func setKeepIconsInDarkAndTinted(_ keepIconsInDarkAndTinted: Bool) {
+        self.keepIconsInDarkAndTinted = keepIconsInDarkAndTinted
     }
 }

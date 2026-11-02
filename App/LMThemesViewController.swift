@@ -111,7 +111,9 @@ final class LMThemesViewController: UITableViewController {
         configuration.buttonSize = .large
         configuration.titleAlignment = .center
         applyButton = UIButton(configuration: configuration, primaryAction: UIAction { [weak self] _ in
-            self?.apply()
+            Task {
+                await self?.apply()
+            }
         })
         let space = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
         let applyItem = UIBarButtonItem(customView: applyButton)
@@ -131,7 +133,9 @@ final class LMThemesViewController: UITableViewController {
         // the package manager may still be installing themes in the background
         changeTimer?.invalidate()
         changeTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            self?.checkForThemeChanges()
+            MainActor.assumeIsolated {
+                self?.checkForThemeChanges()
+            }
         }
     }
 
@@ -151,30 +155,35 @@ final class LMThemesViewController: UITableViewController {
 // MARK: Data
 extension LMThemesViewController {
     @objc private func reloadThemes() {
-        LMThemeLibrary.invalidate()
-        let installed = LMThemeLibrary.installedThemes()
-        var active: [String] = []
-        for theme in LMConfigStore.shared.enabledThemes {
-            if installed.contains(theme) && !active.contains(theme) { active.append(theme) }
-        }
-        self.active = active
-        self.installed = installed
-        self.installed.removeAll { active.contains($0) }
-        // keep the previews of themes whose files didn't change, try the ones that couldn't be read again
-        for theme in Array(details.keys) {
-            if !installed.contains(theme) || details[theme]?["Error"] != nil || details[theme]?["Stamp"] as? String != LMThemeStamp(theme) {
-                details.removeValue(forKey: theme)
+        Task {
+            LMThemeLibrary.invalidate()
+            let installed = LMThemeLibrary.installedThemes()
+            let enabledThemes = await LMConfigStore.shared.enabledThemes
+            var active: [String] = []
+            for theme in enabledThemes {
+                if installed.contains(theme) && !active.contains(theme) {
+                    active.append(theme)
+                }
             }
-        }
-        // themes that were uninstalled drop out of the configuration
-        if active != LMConfigStore.shared.enabledThemes {
-            saveActiveThemes()
-        }
+            self.active = active
+            self.installed = installed
+            self.installed.removeAll { active.contains($0) }
+            // keep the previews of themes whose files didn't change, try the ones that couldn't be read again
+            for theme in Array(details.keys) {
+                if !installed.contains(theme) || details[theme]?["Error"] != nil || details[theme]?["Stamp"] as? String != LMThemeStamp(theme) {
+                    details.removeValue(forKey: theme)
+                }
+            }
+            // themes that were uninstalled drop out of the configuration
+            if active != enabledThemes {
+                await saveActiveThemes()
+            }
 
-        refreshControl?.endRefreshing()
-        tableView.reloadData()
-        updateEmptyState()
-        updateApplyButton()
+            refreshControl?.endRefreshing()
+            tableView.reloadData()
+            updateEmptyState()
+            updateApplyButton()
+        }
     }
 
     // pull to refresh: read every theme again
@@ -214,10 +223,10 @@ extension LMThemesViewController {
     }
 
     @discardableResult
-    private func saveActiveThemes() -> Bool {
-        LMConfigStore.shared.enabledThemes = active
+    private func saveActiveThemes() async -> Bool {
+        await LMConfigStore.shared.setEnabledThemes(active)
         do {
-            try LMConfigStore.shared.save()
+            try await LMConfigStore.shared.save()
             updateApplyButton()
             return true
         } catch {
@@ -247,7 +256,7 @@ extension LMThemesViewController {
             details["Count"] = icons.count + LMThemeLibrary.iconsByAppName(inTheme: theme).count
             details["Error"] = LMThemeLibrary.readError(forTheme: theme)
             details["Preview"] = LMRenderPreview(paths)
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 self.loading.remove(theme)
                 self.details[theme] = details
                 // update the cell on screen itself, a dequeued cell would be a different one
@@ -296,10 +305,13 @@ extension LMThemesViewController {
     }
 
     private func updateApplyButton() {
-        var configuration = applyButton.configuration
-        configuration?.subtitle = LMConfigStore.shared.hasUnappliedChanges ? LMLocalized("Changes not applied yet") : nil
-        applyButton.configuration = configuration
-        applyButton.sizeToFit()
+        Task {
+            var configuration = applyButton.configuration
+            let hasChanges = await LMConfigStore.shared.hasUnappliedChanges
+            configuration?.subtitle = hasChanges ? LMLocalized("Changes not applied yet") : nil
+            applyButton.configuration = configuration
+            applyButton.sizeToFit()
+        }
     }
 
     override func setEditing(_ editing: Bool, animated: Bool) {
@@ -314,8 +326,9 @@ extension LMThemesViewController {
         navigationController?.pushViewController(LMSettingsViewController(), animated: true)
     }
 
-    private func apply() {
-        if !saveActiveThemes() { return }
+    private func apply() async {
+        let success = await saveActiveThemes()
+        guard success else { return }
         present(LMApplyViewController(clearingIconCache: false)!, animated: true) {
             self.updateApplyButton()
         }
@@ -395,7 +408,9 @@ extension LMThemesViewController {
         } completion: { _ in
             tableView.reloadSections(IndexSet(integersIn: 0..<2), with: .none)
         }
-        saveActiveThemes()
+        Task {
+            await saveActiveThemes()
+        }
     }
 
     override func tableView(_ tableView: UITableView, canMoveRowAt indexPath: IndexPath) -> Bool {
@@ -413,7 +428,9 @@ extension LMThemesViewController {
         let theme = active[source.row]
         active.remove(at: source.row)
         active.insert(theme, at: destination.row)
-        saveActiveThemes()
+        Task {
+            await saveActiveThemes()
+        }
     }
 
     override func tableView(_ tableView: UITableView, editingStyleForRowAt indexPath: IndexPath) -> UITableViewCell.EditingStyle {

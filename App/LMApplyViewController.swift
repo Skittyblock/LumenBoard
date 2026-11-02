@@ -95,9 +95,11 @@ final class LMApplyViewController: UIViewController {
             self?.showProgress(UInt32(state >> 32), of: UInt32(state & 0xFFFFFFFF))
         }
         notify_post(clearIconCache ? LMNotifyClearCache : LMNotifyApply)
-        LMConfigStore.shared.markApplied()
+        Task { [weak self] in
+            await LMConfigStore.shared.markApplied()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+
             self?.showFailureIfSpringBoardIsSilent()
         }
     }

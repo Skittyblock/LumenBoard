@@ -9,6 +9,8 @@ enum LMSettingsSection: Int {
 }
 
 final class LMSettingsViewController: UITableViewController {
+    private var settingsSnapshot = LMConfigStore.SettingsSnapshot()
+
     init() {
         super.init(style: .insetGrouped)
     }
@@ -26,6 +28,13 @@ final class LMSettingsViewController: UITableViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         navigationController?.setToolbarHidden(true, animated: animated)
+
+        Task { [weak self] in
+            let settings = await LMConfigStore.shared.settingsSnapshot()
+            guard let self else { return }
+            settingsSnapshot = settings
+            tableView.reloadData()
+        }
     }
 
     func switchWithValue(_ value: Bool, action: Selector) -> UISwitch {
@@ -35,9 +44,9 @@ final class LMSettingsViewController: UITableViewController {
         return toggle
     }
 
-    func save() {
+    func save() async {
         do {
-            try LMConfigStore.shared.save()
+            try await LMConfigStore.shared.save()
         } catch {
             let alert = UIAlertController(title: LMLocalized("Couldn't save"), message: error.localizedDescription, preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: LMLocalized("OK"), style: .cancel))
@@ -47,14 +56,20 @@ final class LMSettingsViewController: UITableViewController {
 
     @objc
     func systemShapeChanged(_ toggle: UISwitch) {
-        LMConfigStore.shared.useSystemIconShape = toggle.isOn
-        save()
+        settingsSnapshot.useSystemIconShape = toggle.isOn
+        Task {
+            await LMConfigStore.shared.setUseSystemIconShape(toggle.isOn)
+            await save()
+        }
     }
 
     @objc
     func keepAppearanceChanged(_ toggle: UISwitch) {
-        LMConfigStore.shared.keepIconsInDarkAndTinted = toggle.isOn
-        save()
+        settingsSnapshot.keepIconsInDarkAndTinted = toggle.isOn
+        Task {
+            await LMConfigStore.shared.setKeepIconsInDarkAndTinted(toggle.isOn)
+            await save()
+        }
     }
 
     func confirmClearIconCache() {
@@ -65,9 +80,11 @@ final class LMSettingsViewController: UITableViewController {
         )
         alert.addAction(UIAlertAction(title: LMLocalized("Cancel"), style: .cancel))
         alert.addAction(UIAlertAction(title: LMLocalized("Clear & Respring"), style: .destructive) { _ in
-            self.save()
-            let applyVC = LMApplyViewController(clearingIconCache: true)!
-            self.present(applyVC, animated: true)
+            Task {
+                await self.save()
+                let applyVC = LMApplyViewController(clearingIconCache: true)!
+                self.present(applyVC, animated: true)
+            }
         })
         present(alert, animated: true)
     }
@@ -111,7 +128,6 @@ extension LMSettingsViewController {
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
         var content = cell.defaultContentConfiguration()
-        let config = LMConfigStore.shared
         cell.selectionStyle = .none
 
         switch LMSettingsSection(rawValue: indexPath.section) {
@@ -119,11 +135,11 @@ extension LMSettingsViewController {
                 if indexPath.row == 0 {
                     content.text = LMLocalized("iOS icon shape")
                     content.image = UIImage(systemName: "app")
-                    cell.accessoryView = switchWithValue(config.useSystemIconShape, action: #selector(systemShapeChanged(_:)))
+                    cell.accessoryView = switchWithValue(settingsSnapshot.useSystemIconShape, action: #selector(systemShapeChanged(_:)))
                 } else {
                     content.text = LMLocalized("Keep in dark & tinted mode")
                     content.image = UIImage(systemName: "circle.lefthalf.filled")
-                    cell.accessoryView = switchWithValue(config.keepIconsInDarkAndTinted, action: #selector(keepAppearanceChanged(_:)))
+                    cell.accessoryView = switchWithValue(settingsSnapshot.keepIconsInDarkAndTinted, action: #selector(keepAppearanceChanged(_:)))
                 }
             case .iconCache:
                 content.text = LMLocalized("Clear icon cache & respring")
