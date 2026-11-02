@@ -98,7 +98,12 @@ final class LMThemesViewController: UITableViewController {
         navigationItem.leftBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "gearshape"), style: .plain, target: self, action: #selector(showSettings))
         navigationItem.rightBarButtonItem = editButtonItem
 
-        var configuration = UIButton.Configuration.filled()
+        var configuration: UIButton.Configuration
+        if #available(iOS 26.0, *) {
+            configuration = .prominentGlass()
+        } else {
+            configuration = .filled()
+        }
         configuration.title = LMLocalized("Apply")
         configuration.image = UIImage(systemName: "square.grid.2x2")
         configuration.imagePadding = 8
@@ -109,7 +114,11 @@ final class LMThemesViewController: UITableViewController {
             self?.apply()
         })
         let space = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
-        toolbarItems = [space, UIBarButtonItem(customView: applyButton), space]
+        let applyItem = UIBarButtonItem(customView: applyButton)
+        if #available(iOS 26.0, *) {
+            applyItem.hidesSharedBackground = true
+        }
+        toolbarItems = [space, applyItem, space]
 
         refreshControl = UIRefreshControl()
         refreshControl?.addTarget(self, action: #selector(refresh), for: .valueChanged)
