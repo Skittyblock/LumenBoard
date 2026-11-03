@@ -1,8 +1,10 @@
 // Themed icons get their own digest (= icon cache key) in every process,
 // iconservicesagent renders them from the theme png. When it doesn't (e.g. palera1n), the requesting process renders them itself.
 
+#import "Private.h"
 #import "LMIconStore.h"
 #import "LMStatus.h"
+#import "LMCalendarArtwork.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <mach-o/dyld.h>
@@ -10,59 +12,6 @@
 #import <stdatomic.h>
 #import <ImageIO/ImageIO.h>
 #import <CommonCrypto/CommonDigest.h>
-
-@interface ISConcreteIcon : NSObject
-- (NSUUID *)digest;
-@end
-
-@interface ISBundleIdentifierIcon : ISConcreteIcon
-- (instancetype)initWithBundleIdentifier:(NSString *)bundleIdentifier;
-- (NSString *)bundleIdentifier;
-@end
-
-@interface ISBundleIcon : ISConcreteIcon
-- (instancetype)initWithBundleURL:(NSURL *)url type:(NSString *)type tag:(NSString *)tag tagClass:(NSString *)tagClass;
-- (NSURL *)url;
-@end
-
-@interface ISApplicationIdentityIcon : ISConcreteIcon
-- (instancetype)initWithApplicationIdentity:(id)identity;
-- (NSString *)identityString;
-@end
-
-@interface ISResourceProvider : NSObject
-- (instancetype)initWithResource:(id)resource templateResource:(id)templateResource;
-- (void)setResourceType:(unsigned long long)resourceType;
-- (void)setAllowNonDefaultAppearances:(BOOL)allow;
-- (void)setAllowAlterationsToResourceArt:(BOOL)allow;
-- (void)setIconResource:(id)resource;
-- (void)setSuggestedRecipe:(id)recipe;
-@end
-
-@interface IFImage : NSObject
-- (instancetype)initWithCGImage:(CGImageRef)image scale:(double)scale;
-- (NSData *)validationToken;
-@end
-
-@interface ISGenerationRequest : NSObject
-- (void)setIcon:(id)icon;
-- (void)setImageDescriptor:(id)descriptor;
-- (IFImage *)generateImage;
-@end
-
-@interface IFImageBag : NSObject
-- (instancetype)initWithImages:(NSArray *)images;
-@end
-
-@interface LSApplicationRecord : NSObject
-- (instancetype)initWithURL:(NSURL *)url allowPlaceholder:(BOOL)allowPlaceholder error:(NSError **)error;
-- (NSString *)bundleIdentifier;
-@end
-
-@interface LSApplicationIdentity : NSObject
-- (instancetype)initWithIdentityString:(NSString *)identityString;
-- (NSString *)bundleIdentifier;
-@end
 
 static BOOL LMHooksInstalled;
 static Ivar LMDigestIvar;
@@ -287,6 +236,7 @@ static IFImage *LMRenderHere(ISConcreteIcon *icon, id descriptor) {
 }
 
 static void LMMapDidChange(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+  LMInvalidateCalendarSettings();
   // iconservicesagent was restarted with the new map, give it another chance
   if (!atomic_exchange(&LMAgentRendersThemes, true)) LMStatusSet(LMStatusAgentRendersThemes, @YES);
 }
@@ -467,11 +417,15 @@ static void LMInstallIconHooks(void) {
 }
 
 static void LMImageAdded(const struct mach_header *header, intptr_t slide) {
-  if (LMHooksInstalled) return;
+  if (LMHooksInstalled && LMCalendarHooksInstalled) return;
   Dl_info info;
-  if (!dladdr(header, &info) || !info.dli_fname || !strstr(info.dli_fname, "/IconServices.framework/")) return;
-  // IconServices got loaded after us
-  dispatch_async(dispatch_get_main_queue(), ^{ LMInstallIconHooks(); });
+  if (!dladdr(header, &info) || !info.dli_fname) return;
+  if (!strstr(info.dli_fname, "/IconServices.framework/") && !strstr(info.dli_fname, "/CalendarUIKit.framework/")) return;
+  // IconServices or CalendarUIKit got loaded after us
+  dispatch_async(dispatch_get_main_queue(), ^{
+    LMInstallIconHooks();
+    LMInstallCalendarHooks();
+  });
 }
 
 %ctor {
@@ -480,6 +434,7 @@ static void LMImageAdded(const struct mach_header *header, intptr_t slide) {
     LMStatusSet(LMStatusLoaded, [NSDate date]);
     LMStatusSet(LMStatusHooksInstalled, @NO);
     LMInstallIconHooks();
-    if (!LMHooksInstalled) _dyld_register_func_for_add_image(LMImageAdded);
+    LMInstallCalendarHooks();
+    if (!LMHooksInstalled || !LMCalendarHooksInstalled) _dyld_register_func_for_add_image(LMImageAdded);
   }
 }
